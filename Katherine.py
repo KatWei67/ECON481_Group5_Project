@@ -60,17 +60,3 @@ model = sm.OLS(Y, X).fit()
 # Print the model summary
 print("\nOLS Model Summary:")
 print(model.summary())
-
-# Predict the prices for each city/state combination
-# Get unique combinations of city and state
-unique_combinations = df.drop(columns=['price']).drop_duplicates()
-
-# Add a constant to these combinations
-unique_combinations = sm.add_constant(unique_combinations)
-
-# Predict prices
-unique_combinations['predicted_price'] = model.predict(unique_combinations)
-
-# Display the predictions
-print("\nPredicted Prices for Each City/State Combination:")
-print(unique_combinations[['predicted_price']])
