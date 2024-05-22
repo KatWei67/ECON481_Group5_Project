@@ -1,19 +1,26 @@
 ### Required imports
 import pandas as pd
 import zipfile
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import LinearRegression, Ridge
 from sklearn.metrics import mean_squared_error, r2_score
 import matplotlib.pyplot as plt
 import seaborn as sns
+import statsmodels.api as sm  # For detailed regression summary
+from statsmodels.stats.outliers_influence import variance_inflation_factor
 
-### Function to load data from a zip file
-def load_data(zip_file_path, csv_file_name):
-    with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
-        print("Files in zip:", zip_ref.namelist())
-        with zip_ref.open(csv_file_name) as csv_file:
-            df = pd.read_csv(csv_file)
-            print(df.head())
-    return df
+# Define the path to the zip file and the name of the CSV file within the zip
+zip_file_path = 'usa-real-estate-dataset.zip'
+csv_file_name = 'realtor-data.zip.csv'  # Adjust if the file name inside the zip is different
+
+# Open the zip file
+with zipfile.ZipFile(zip_file_path, 'r') as zip_ref:
+    # List all files in the zip archive (optional)
+    print("Files in zip:", zip_ref.namelist())
+
+    # Read the CSV file into a pandas DataFrame
+    with zip_ref.open(csv_file_name) as csv_file:
+        df = pd.read_csv(csv_file)
+        print(df.head())  # Display the first few rows of the DataFrame
 
 ### Function to clean the data
 def clean_data(df):
@@ -48,7 +55,7 @@ def fit_state_models(df, features, target):
         X_state = state_df[features]
         y_state = state_df[target]
 
-        model = LinearRegression()
+        model = LinearRegression(fit_intercept=True)
         model.fit(X_state, y_state)
 
         state_df['predicted_price'] = model.predict(X_state)
@@ -138,21 +145,88 @@ def plot_model_performance(state_models):
     plt.tight_layout()
     plt.show()
 
+### Function to display regression results for California using statsmodels
+def display_california_regression_results_sm(df, features, target):
+    california_df = df[df['state'] == 'California']
+    X_california = california_df[features]
+    y_california = california_df[target]
+
+    # Add a constant to the independent variables matrix (for the intercept)
+    X_california = sm.add_constant(X_california)
+
+    # Fit the regression model
+    model = sm.OLS(y_california, X_california).fit()
+
+    # Print the regression results
+    print(model.summary())
+
+### Function to display regression results for California using sklearn
+def display_california_regression_results_sklearn(df, features, target):
+    california_df = df[df['state'] == 'California']
+    X_california = california_df[features]
+    y_california = california_df[target]
+
+    model = LinearRegression(fit_intercept=True)
+    model.fit(X_california, y_california)
+    
+    y_pred = model.predict(X_california)
+
+    mse = mean_squared_error(y_california, y_pred)
+    r2 = r2_score(y_california, y_pred)
+
+    print(f"Regression coefficients (sklearn): {model.coef_}")
+    print(f"Intercept (sklearn): {model.intercept_}")
+    print(f"Mean Squared Error (sklearn): {mse}")
+    print(f"R-squared (sklearn): {r2}")
+
+    california_df['predicted_price'] = y_pred
+    print(california_df[['price', 'predicted_price']].head())
+
+### Function to check VIF (Variance Inflation Factor)
+def check_vif(df, features):
+    X = df[features]
+    X = sm.add_constant(X)
+    vif_data = pd.DataFrame()
+    vif_data['feature'] = X.columns
+    vif_data['VIF'] = [variance_inflation_factor(X.values, i) for i in range(X.shape[1])]
+    return vif_data
+
+def plot_relationship(df, feature, target):
+    plt.figure(figsize=(10, 6))
+    plt.scatter(df[feature], df[target], alpha=0.5)
+    plt.title(f'Scatter plot of {target} vs {feature}')
+    plt.xlabel(feature)
+    plt.ylabel(target)
+    plt.show()
+
+
 ### Main function to orchestrate the process
 def main():
-    zip_file_path = 'usa-real-estate-dataset.zip'
-    csv_file_name = 'realtor-data.zip.csv'
-
-    df = load_data(zip_file_path, csv_file_name)
     df_cleaned = clean_data(df)
 
     features = ['bed', 'bath', 'acre_lot', 'house_size']
     target = 'price'
 
-    state_models = fit_state_models(df_cleaned, features, target)
-    print_predicted_prices(state_models)
+    # Remove properties with bedrooms > 20 (arbitrary threshold based on scatter plot)
+    df_cleaned_no_extreme_beds = df_cleaned[df_cleaned['bed'] <= 10]
+    # Also remobe bedrooms < 2
+    df_cleaned_no_extreme_beds = df_cleaned_no_extreme_beds[df_cleaned_no_extreme_beds['bed'] >= 2]
+
+    # Remove properties with prices > 10 million (arbitrary threshold based on scatter plot)
+    df_cleaned_no_extreme_beds_and_prices = df_cleaned_no_extreme_beds[df_cleaned_no_extreme_beds['price'] <= 10**6]
+
+    print(f"Number of observations after removing extreme outliers: {len(df_cleaned_no_extreme_beds_and_prices)}")
+
+    # Re-plot the scatter plot to check if outliers are removed
+    plot_relationship(df_cleaned_no_extreme_beds_and_prices, 'bed', 'price')
+
+    # Fit state models without extreme outliers
+    state_models = fit_state_models(df_cleaned_no_extreme_beds_and_prices, features, target)
+    print(state_models['California']['model'].coef_)
+
+    # print_predicted_prices(state_models)
     
-    # show three examples of how predict model works
+    # Show three examples of how the predict model works
     predicted_price = predict_price(state_models, 'California', 3, 2, 0.25, 2000)
     print(f"Predicted price for the house in California: ${predicted_price:.2f}")
     predicted_price = predict_price(state_models, 'Texas', 4, 3, 0.5, 3000)
@@ -160,9 +234,20 @@ def main():
     predicted_price = predict_price(state_models, 'Florida', 2, 1, 0.1, 1500)
     print(f"Predicted price for the house in Florida: ${predicted_price:.2f}")
 
-    # visualization 
+    # Visualization 
     plot_predicted_prices_by_state(state_models)
     plot_model_performance(state_models)
+
+    # Display regression results for California using statsmodels
+    print("\nStatsmodels OLS Regression Results for California:")
+    display_california_regression_results_sm(df_cleaned_no_extreme_beds_and_prices, features, target)
+
+    # Display regression results for California using sklearn
+    print("\nSklearn Linear Regression Results for California:")
+    display_california_regression_results_sklearn(df_cleaned_no_extreme_beds_and_prices, features, target)
+
+    # Example: Plotting price vs bed
+    plot_relationship(df_cleaned_no_extreme_beds_and_prices, 'bed', 'price')
 
 if __name__ == "__main__":
     main()
