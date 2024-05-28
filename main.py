@@ -222,7 +222,6 @@ def clean_data(df):
     df_cleaned = df.dropna(subset=['bed', 'bath', 'acre_lot', 'house_size', 'price'])
     return df_cleaned
 
-# Example usage
 df_2 = clean_data(df)
 
 #seed
